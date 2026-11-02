@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+dist/
+*.egg-info/
+
+# tapes produced by the CLI (bug.tape.json, min.tape.json, fork.tape.json, ...)
+*.tape.json
+.idea
