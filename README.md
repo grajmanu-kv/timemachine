@@ -1,5 +1,5 @@
 # timemachine
-
+![img.png](img.png)
 Deterministic simulation for multi-agent systems: every run is exactly reproducible, every non-deterministic input is recorded, and a failing run can be replayed, minimised, diffed, rewound and forked. Standard library only. The project pins Python >= 3.14; the test suite passes on 3.13 and 3.14.
 
 ## Quick start
@@ -9,13 +9,14 @@ Layout is `src/timemachine/`; `uv sync` installs it as an editable package and r
 ```bash
 uv sync
 uv run timemachine demo                            # end-to-end walkthrough
-uv run pytest                                      # 100 tests; add -m "not slow" to skip the long ones
+uv run pytest                                      # 111 tests; add -m "not slow" to skip the long ones
 
 uv run timemachine search --seeds 2000 --out bug.tape.json   # --faults defaults to 16
 uv run timemachine replay bug.tape.json
 uv run timemachine shrink bug.tape.json --out min.tape.json
 uv run timemachine diff bug.tape.json min.tape.json
 uv run timemachine show min.tape.json --start 10
+uv run timemachine view bug.tape.json min.tape.json --out view.html --open   # swimlane viewer (see Viewing a tape)
 uv run timemachine fork min.tape.json --at 8 --fault '{"kind":"drop","src":"c","dst":"s","n":2}'
 uv run timemachine search --fixed                  # the bug-fixed variant: finds nothing
 
@@ -36,10 +37,11 @@ uv run timemachine search --scenario lease_drift --param bug=null  # ttl shorten
 ## Repository layout
 
 ```
-src/timemachine/   the package (tape, simulator, tools, CLI, built-in scenarios: demo_agents, election, lease)
+src/timemachine/   the package (tape, simulator, tools, CLI, viewer, built-in scenarios: demo_agents, election, lease)
 tests/             pytest suite; machinery tests use a tiny `toy` scenario (tests/helpers.py),
                    scenario-specific tests live in tests/scenarios/
-scripts/           measure_hit_rate.py reproduces the "Search tuning" table below
+scripts/           measure_hit_rate.py reproduces the "Search tuning" table below;
+                   build_viz_demo.py builds the viewer's demo page
 ```
 
 Tests are not part of the installed package. `tests/helpers.py` holds the fixture seeds, which depend on the exact behaviour of `random_plan` and must be regenerated if plan generation changes.
@@ -53,6 +55,20 @@ Tests are not part of the installed package. `tests/helpers.py` holds the fixtur
 | `election` `bug=churn` | Followers never reset their election timer on a heartbeat. | Liveness: once faults have healed, a leader exists and no new election starts in the last 200 ms. |
 | `lease` `bug=abs` | The lock server stamps each grant with an absolute expiry from its wall clock and clients trust it against theirs. Correct only while all clocks agree. | Safety: at most one client believes it holds the lease, judged on that client's own clock. Needs a `skew` fault: with the skew faults removed, the same plans pass. |
 | `lease_drift` `bug=nomargin` | Durations are measured on the monotonic clock (immune to skew), but the client trusts the full ttl. A slow client clock against a fast server clock makes the client's lease outlive the server's. | Same safety property. Needs a `drift` fault. The correct variant (`bug=null`) shortens the client's belief to `ttl * (1-e)/(1+e)`, at the cost of using only 66% of every lease at e = 20%. |
+
+## Viewing a tape
+
+`timemachine view a.tape.json [b.tape.json ...] --out view.html [--open]` writes one self-contained HTML page (no network requests, no dependencies) that draws the run as swimlanes:
+
+- one lane per node on a true-time axis; messages are arrows, lost ones end in a cross, duplicates are dashed;
+- crashes are shaded bands; clock skew and drift are coloured strips and flags on the lane, and each lane label shows the node's state at the cursor;
+- a scrubber (drag, arrow keys, or play) dims everything after the cursor, so rewinding is literal; the event list, the selected event's raw data and chain hash, and the fault plan (click a fault to jump to the event it caused) follow it;
+- with several tapes, later ones are compared with the first by default: the page marks the shared prefix and the first event whose hash differs, the same answer `diff` gives;
+- the detail panel prints a ready-to-run `timemachine fork FILE --at N --fault ...` for the event you are on.
+
+A tape whose hash chain does not verify is drawn with a warning, not silently. `uv run python scripts/build_viz_demo.py` builds the five-tape demo page from live runs (the lease clock-skew bug, the same fault against the correct design, rate drift, and a crash-and-retry bug); a test checks that what its notes claim is what the library produces.
+
+The viewer's logic was checked in a real browser (rendering in both colour schemes, a 400 px phone width, scrubbing, play, zoom, tab switching, compare) but that check is a manual script, not part of the test suite: the tests cover embedding, escaping, the CLI and that the script parses.
 
 ## Model
 
@@ -126,3 +142,4 @@ Violating plans found per 4000 seeds, by number of faults per random plan (one r
 - **Validated on four small scenarios** (an idempotency bug, a leader-election bug pair, and two lease-and-clock bugs that share one protocol). The tests show the machinery works; they do not show it scales to large agent systems.
 - **Liveness checks on randomised protocols can false-alarm.** "Eventually a leader exists" is evaluated on one finite, seeded run, so a protocol that is correct in expectation can still livelock on a given seed. The election scenario found exactly this in its own correct variant when election timeouts were close to network jitter (kept as a regression test). Treat liveness hits as "investigate", and judge a configuration by its hit *rate* over many seeds, not by a single run.
 - **Fault search is sparse for subtle bugs.** Even at 16 faults per plan the election safety bug is hit on about 1.4% of seeds (56 of 4000), so budget thousands of seeds, not dozens.
+- The compression layer discussed earlier (an NCM-style coarse-to-fine hierarchy over tapes) is **not implemented**; it is a speculative phase 2.

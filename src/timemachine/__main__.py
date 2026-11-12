@@ -111,6 +111,27 @@ def cmd_fork(a) -> int:
     return 0
 
 
+def cmd_view(a) -> int:
+    from . import viz
+    entries = []
+    for path in a.tapes:
+        tape = Tape.load(path)
+        name = os.path.basename(path)
+        label = name[: -len(".tape.json")] if name.endswith(".tape.json") else os.path.splitext(name)[0]
+        entry = viz.tape_entry(tape, label, file=name)
+        if not entry["chain_ok"]:
+            print(f"warning: {path}: hash chain does not verify at event #{entry['chain_bad']}; the tape was edited or corrupted")
+        entries.append(entry)
+    with open(a.out, "w", encoding="utf-8") as f:
+        f.write(viz.render_html(entries))
+    print(f"viewer written: {a.out}  ({len(entries)} tape{'s' if len(entries) != 1 else ''}; open it in a browser)")
+    if a.open:
+        import pathlib
+        import webbrowser
+        webbrowser.open(pathlib.Path(a.out).resolve().as_uri())
+    return 0
+
+
 def cmd_demo(a) -> int:
     work = tempfile.mkdtemp(prefix="timemachine-")
     p = lambda name: os.path.join(work, name)
@@ -201,6 +222,12 @@ def main(argv=None) -> int:
     s.add_argument("--fault", action="append", default=[], help='JSON fault, e.g. \'{"kind":"drop","src":"c","dst":"s","n":2}\'')
     s.add_argument("--out", default="fork.tape.json")
     s.set_defaults(fn=cmd_fork)
+
+    s = sub.add_parser("view", help="write a self-contained HTML viewer (swimlanes, scrubber, event log) for one or more tapes")
+    s.add_argument("tapes", nargs="+", help="tape files; with several, later tapes are compared with the first")
+    s.add_argument("--out", default="view.html")
+    s.add_argument("--open", action="store_true", help="open the page in the default browser")
+    s.set_defaults(fn=cmd_view)
 
     s = sub.add_parser("demo", help="end-to-end walkthrough on the built-in scenario")
     s.set_defaults(fn=cmd_demo)
